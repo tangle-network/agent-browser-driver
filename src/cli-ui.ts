@@ -200,9 +200,13 @@ export class CliRenderer {
     if (this.total === 1) {
       console.log(`  ${icon} ${name} ${chalk.dim(`(${stats})`)}`)
       const resultText = passed ? verdict : chalk.red(verdict)
-      console.log(`     ${resultText}`)
+      // Indent every line so a multi-line result (the agent's full answer) stays aligned.
+      console.log(resultText.split('\n').map(line => `     ${line}`).join('\n'))
     } else {
-      const truncated = verdict.length > 80 ? verdict.slice(0, 77) + '…' : verdict
+      // Multi-task rows are single-line, so collapse any newlines (a multi-line
+      // result) to spaces before truncating.
+      const oneLine = verdict.replace(/\s*\n\s*/g, ' ')
+      const truncated = oneLine.length > 80 ? oneLine.slice(0, 77) + '…' : oneLine
       const verdictText = passed ? truncated : chalk.red(truncated)
       console.log(`  ${icon} ${name} ${chalk.dim('—')} ${verdictText} ${chalk.dim(`(${stats})`)}`)
     }

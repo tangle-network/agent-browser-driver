@@ -224,11 +224,20 @@ export function normalizeReport(
       const testId = (testCase.id ?? testCase.name ?? 'cli-task') as string
       const recording = recordings.find(rec => rec.testId === testId)
         ?? recordings.find(rec => rec.testId === 'default')
+      // The agent's answer lives in `agentResult.result` (its completion message)
+      // or, when that's empty, in `goalVerification.evidence`. Derive it here so the
+      // viewer shows the real result even for older reports whose `verdict` field
+      // was baked as a bare "Goal achieved".
+      const goalVerification = (agentResult.goalVerification ?? {}) as { evidence?: unknown }
+      const evidence = (Array.isArray(goalVerification.evidence) ? goalVerification.evidence : [])
+        .filter((e): e is string => typeof e === 'string' && e.trim().length > 0)
+      const answer = ((agentResult.result as string) || '').trim() || evidence.join('\n') || undefined
       return {
         id: testId,
         name: testCase.name ?? testId,
         success: agentResult.success ?? r.agentSuccess,
         verdict: r.verdict,
+        answer,
         turnsUsed: r.turnsUsed,
         durationMs: r.durationMs,
         estimatedCostUsd: r.estimatedCostUsd,

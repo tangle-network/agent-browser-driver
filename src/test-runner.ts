@@ -1063,7 +1063,15 @@ export class TestRunner {
     criteriaResults?: CriterionResult[],
   ): string {
     if (verified && agentResult.success) {
-      return agentResult.result || 'Goal achieved';
+      // Prefer the agent's own completion message. When it's empty (the agent
+      // stashed its findings in goalVerification.evidence instead — e.g. an
+      // extract-heavy goal), surface that evidence so the real answer reaches
+      // the CLI output and the report's `verdict` field, instead of a bare
+      // "Goal achieved" that hides the result.
+      const evidence = (agentResult.goalVerification?.evidence ?? []).filter(Boolean);
+      return agentResult.result?.trim()
+        || (evidence.length ? evidence.join('\n') : '')
+        || 'Goal achieved';
     }
     if (!agentResult.success) {
       return agentResult.reason || 'Agent failed';
