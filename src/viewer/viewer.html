@@ -946,7 +946,7 @@
             </div>
           </div>
         </div>
-        ${test.verdict ? `<div class="panel"><h3>Verdict</h3><div class="panel-body">${escapeHtml(test.verdict)}</div></div>` : ''}
+        ${(test.answer || test.verdict) ? `<div class="panel"><h3>Result</h3><div class="panel-body" style="white-space: pre-wrap;">${escapeHtml(test.answer || test.verdict)}</div></div>` : ''}
         <div class="panel">
           <h3>About this view</h3>
           <div class="panel-body" style="font-size: 12px;">

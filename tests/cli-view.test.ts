@@ -458,3 +458,34 @@ describe('findReportJson resolution', () => {
     expect(findReportJson(tmpDir)).toBeNull()
   })
 })
+
+describe('normalizeReport surfaces the agent answer', () => {
+  const baseResult = (agentResult: Record<string, unknown>) => ({
+    results: [{ testCase: { id: 'cli-task' }, verdict: 'Goal achieved', agentResult }],
+  })
+  const firstTest = (raw: unknown) =>
+    (normalizeReport(raw, []).tests as Array<Record<string, unknown>>)[0]
+
+  it('falls back to goalVerification.evidence when the completion message is empty', () => {
+    const t = firstTest(baseResult({
+      success: true,
+      result: '',
+      goalVerification: { achieved: true, evidence: ['Top 3: A, B, C', 'Read A because reasons'], missing: [] },
+    }))
+    expect(t.answer).toBe('Top 3: A, B, C\nRead A because reasons')
+  })
+
+  it('prefers the completion message when present', () => {
+    const t = firstTest(baseResult({
+      success: true,
+      result: 'The pricing page loaded.',
+      goalVerification: { evidence: ['ignored'] },
+    }))
+    expect(t.answer).toBe('The pricing page loaded.')
+  })
+
+  it('is undefined when there is neither a message nor evidence', () => {
+    const t = firstTest(baseResult({ success: true, result: '', goalVerification: { evidence: [] } }))
+    expect(t.answer).toBeUndefined()
+  })
+})
