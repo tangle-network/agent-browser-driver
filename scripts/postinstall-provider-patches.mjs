@@ -6,31 +6,19 @@ import path from 'node:path';
 const ROOT = path.resolve(path.dirname(new URL(import.meta.url).pathname), '..');
 
 function applyClaudeCodeExitPatch(source) {
-  const alreadyPatched = source.includes('let receivedFinalResult = false;')
-    && source.includes('Ignoring post-result process error');
-  if (alreadyPatched) return source;
+  if (source.includes('Ignoring post-result process error')) return source;
 
-  const headerNeedle = '    let text = "";\n    let structuredOutput;\n';
-  const resultNeedle = '        } else if (message.type === "result") {\n';
+  const resultState = '    let receivedResultMessage = false;\n';
   const catchNeedle = `      } else {\n        throw this.handleClaudeCodeError(error, messagesPrompt, collectedStderr);\n      }\n`;
 
-  if (!source.includes(headerNeedle) || !source.includes(resultNeedle) || !source.includes(catchNeedle)) {
+  if (!source.includes(resultState) || !source.includes(catchNeedle)) {
     throw new Error('Claude Code provider patch failed: expected upstream anchors were not found.');
   }
 
-  return source
-    .replace(
-      headerNeedle,
-      '    let text = "";\n    let structuredOutput;\n    let receivedFinalResult = false;\n',
-    )
-    .replace(
-      resultNeedle,
-      '        } else if (message.type === "result") {\n          receivedFinalResult = true;\n',
-    )
-    .replace(
-      catchNeedle,
-      `      } else if (receivedFinalResult) {\n        warnings.push({\n          type: "other",\n          message: \`Claude Code process exited after emitting a final result: \${error instanceof Error ? error.message : String(error)}\`\n        });\n        this.logger.warn(\n          \`[claude-code] Ignoring post-result process error: \${error instanceof Error ? error.message : String(error)}\`\n        );\n      } else {\n        throw this.handleClaudeCodeError(error, messagesPrompt, collectedStderr);\n      }\n`,
-    );
+  return source.replace(
+    catchNeedle,
+    `      } else if (receivedResultMessage) {\n        warnings.push({\n          type: "other",\n          message: \`Claude Code process exited after emitting a final result: \${error instanceof Error ? error.message : String(error)}\`\n        });\n        this.logger.warn(\n          \`[claude-code] Ignoring post-result process error: \${error instanceof Error ? error.message : String(error)}\`\n        );\n      } else {\n        throw this.handleClaudeCodeError(error, messagesPrompt, collectedStderr);\n      }\n`,
+  );
 }
 
 const patches = [
