@@ -199,9 +199,11 @@ export class CliRenderer {
     // Single-task: show full result on its own line for readability
     if (this.total === 1) {
       console.log(`  ${icon} ${name} ${chalk.dim(`(${stats})`)}`)
-      const resultText = passed ? verdict : chalk.red(verdict)
-      // Indent every line so a multi-line result (the agent's full answer) stays aligned.
-      console.log(resultText.split('\n').map(line => `     ${line}`).join('\n'))
+      // Indent each line so a multi-line result (the agent's full answer) stays
+      // aligned, and color per line so a failed multi-line result renders uniformly
+      // red. Trailing newlines are trimmed so they don't emit a stray blank row.
+      const lines = verdict.replace(/\n+$/, '').split('\n')
+      console.log(lines.map(line => `     ${passed ? line : chalk.red(line)}`).join('\n'))
     } else {
       // Multi-task rows are single-line, so collapse any newlines (a multi-line
       // result) to spaces before truncating.

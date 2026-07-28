@@ -129,6 +129,47 @@ describe('CliRenderer', () => {
     renderer.destroy()
   })
 
+  it('indents every line of a multi-line single-task result', () => {
+    const spy = vi.spyOn(console, 'log').mockImplementation(() => {})
+    const renderer = new CliRenderer()
+    renderer.suiteStart(1)
+    renderer.testStart('cli-task', 'HN briefing')
+    renderer.testComplete('cli-task', true, 'Top 3: A, B, C\nRead A because it matters', 4, 8000)
+
+    const resultCall = spy.mock.calls.map(c => stripAnsi(String(c[0]))).find(l => l.includes('Top 3'))
+    expect(resultCall).toBe('     Top 3: A, B, C\n     Read A because it matters')
+    spy.mockRestore()
+    renderer.destroy()
+  })
+
+  it('does not emit a stray blank row for a trailing newline', () => {
+    const spy = vi.spyOn(console, 'log').mockImplementation(() => {})
+    const renderer = new CliRenderer()
+    renderer.suiteStart(1)
+    renderer.testStart('cli-task', 'x')
+    renderer.testComplete('cli-task', true, 'answer text\n', 2, 3000)
+
+    const resultCall = spy.mock.calls.map(c => stripAnsi(String(c[0]))).find(l => l.includes('answer text'))
+    expect(resultCall).toBe('     answer text')
+    spy.mockRestore()
+    renderer.destroy()
+  })
+
+  it('collapses newlines in a multi-line result for multi-task rows', () => {
+    const spy = vi.spyOn(console, 'log').mockImplementation(() => {})
+    const renderer = new CliRenderer()
+    renderer.suiteStart(2)
+    renderer.testStart('a', 'A')
+    renderer.testComplete('a', true, 'line one\nline two', 3, 5000)
+
+    const row = spy.mock.calls.map(c => stripAnsi(String(c[0]))).find(l => l.includes('line one'))
+    expect(row).toBeDefined()
+    expect(row).toContain('line one line two')
+    expect(row).not.toContain('\n')
+    spy.mockRestore()
+    renderer.destroy()
+  })
+
   it('renders suite summary with total turns and cost', () => {
     const spy = vi.spyOn(console, 'log').mockImplementation(() => {})
     const renderer = new CliRenderer()

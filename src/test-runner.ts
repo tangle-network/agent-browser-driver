@@ -21,6 +21,7 @@ import type {
   Turn,
 } from './types.js';
 import { TEST_SUITE_SCHEMA_VERSION } from './types.js';
+import { deriveAnswer } from './answer.js';
 import type { Driver } from './drivers/types.js';
 import type { ArtifactSink, ProgressEvent } from './artifacts/types.js';
 import { FilesystemSink } from './artifacts/filesystem-sink.js';
@@ -1063,15 +1064,10 @@ export class TestRunner {
     criteriaResults?: CriterionResult[],
   ): string {
     if (verified && agentResult.success) {
-      // Prefer the agent's own completion message. When it's empty (the agent
-      // stashed its findings in goalVerification.evidence instead — e.g. an
-      // extract-heavy goal), surface that evidence so the real answer reaches
-      // the CLI output and the report's `verdict` field, instead of a bare
-      // "Goal achieved" that hides the result.
-      const evidence = (agentResult.goalVerification?.evidence ?? []).filter(Boolean);
-      return agentResult.result?.trim()
-        || (evidence.length ? evidence.join('\n') : '')
-        || 'Goal achieved';
+      // Surface the agent's answer (completion message, else goal-verification
+      // evidence) so it reaches the CLI output and the report's `verdict` field
+      // instead of a bare "Goal achieved" that hides the result.
+      return deriveAnswer(agentResult) ?? 'Goal achieved';
     }
     if (!agentResult.success) {
       return agentResult.reason || 'Agent failed';

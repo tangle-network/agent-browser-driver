@@ -18,6 +18,7 @@ import * as http from 'node:http'
 import { fileURLToPath } from 'node:url'
 import { spawn } from 'node:child_process'
 import chalk from 'chalk'
+import { deriveAnswer } from './answer.js'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 
@@ -224,14 +225,9 @@ export function normalizeReport(
       const testId = (testCase.id ?? testCase.name ?? 'cli-task') as string
       const recording = recordings.find(rec => rec.testId === testId)
         ?? recordings.find(rec => rec.testId === 'default')
-      // The agent's answer lives in `agentResult.result` (its completion message)
-      // or, when that's empty, in `goalVerification.evidence`. Derive it here so the
-      // viewer shows the real result even for older reports whose `verdict` field
-      // was baked as a bare "Goal achieved".
-      const goalVerification = (agentResult.goalVerification ?? {}) as { evidence?: unknown }
-      const evidence = (Array.isArray(goalVerification.evidence) ? goalVerification.evidence : [])
-        .filter((e): e is string => typeof e === 'string' && e.trim().length > 0)
-      const answer = ((agentResult.result as string) || '').trim() || evidence.join('\n') || undefined
+      // Derive the answer so the viewer's Result panel shows the real output even
+      // for older reports whose `verdict` was baked as a bare "Goal achieved".
+      const answer = deriveAnswer(agentResult)
       return {
         id: testId,
         name: testCase.name ?? testId,
@@ -275,6 +271,7 @@ export function normalizeReport(
       tests: [{
         id: 'default',
         name: 'run',
+        answer: deriveAnswer(data as { result?: unknown; goalVerification?: { evidence?: unknown } }),
         recording: recording ? recording.relPath : null,
         turns,
       }],
