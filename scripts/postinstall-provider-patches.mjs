@@ -2,35 +2,35 @@
 
 import fs from 'node:fs';
 import path from 'node:path';
+import { pathToFileURL } from 'node:url';
 
 const ROOT = path.resolve(path.dirname(new URL(import.meta.url).pathname), '..');
 
-function applyClaudeCodeExitPatch(source) {
-  const alreadyPatched = source.includes('let receivedFinalResult = false;')
-    && source.includes('Ignoring post-result process error');
-  if (alreadyPatched) return source;
-
-  const headerNeedle = '    let text = "";\n    let structuredOutput;\n';
-  const resultNeedle = '        } else if (message.type === "result") {\n';
+export function applyClaudeCodeExitPatch(source) {
+  const resultState = '    let receivedResultMessage = false;\n';
+  const resultAssignment = '          receivedResultMessage = true;\n';
   const catchNeedle = `      } else {\n        throw this.handleClaudeCodeError(error, messagesPrompt, collectedStderr);\n      }\n`;
+  const patchedCatchNeedle = '      } else if (receivedResultMessage) {\n';
 
-  if (!source.includes(headerNeedle) || !source.includes(resultNeedle) || !source.includes(catchNeedle)) {
-    throw new Error('Claude Code provider patch failed: expected upstream anchors were not found.');
+  if (!source.includes(resultState) || !source.includes(resultAssignment)) {
+    throw new Error('Claude Code provider patch failed: result-state anchors were not found.');
   }
 
-  return source
-    .replace(
-      headerNeedle,
-      '    let text = "";\n    let structuredOutput;\n    let receivedFinalResult = false;\n',
-    )
-    .replace(
-      resultNeedle,
-      '        } else if (message.type === "result") {\n          receivedFinalResult = true;\n',
-    )
-    .replace(
-      catchNeedle,
-      `      } else if (receivedFinalResult) {\n        warnings.push({\n          type: "other",\n          message: \`Claude Code process exited after emitting a final result: \${error instanceof Error ? error.message : String(error)}\`\n        });\n        this.logger.warn(\n          \`[claude-code] Ignoring post-result process error: \${error instanceof Error ? error.message : String(error)}\`\n        );\n      } else {\n        throw this.handleClaudeCodeError(error, messagesPrompt, collectedStderr);\n      }\n`,
-    );
+  if (source.includes('Ignoring post-result process error')) {
+    if (!source.includes(patchedCatchNeedle)) {
+      throw new Error('Claude Code provider patch failed: patched catch branch was not found.');
+    }
+    return source;
+  }
+
+  if (!source.includes(catchNeedle)) {
+    throw new Error('Claude Code provider patch failed: upstream catch anchor was not found.');
+  }
+
+  return source.replace(
+    catchNeedle,
+    `      } else if (receivedResultMessage) {\n        warnings.push({\n          type: "other",\n          message: \`Claude Code process exited after emitting a final result: \${error instanceof Error ? error.message : String(error)}\`\n        });\n        this.logger.warn(\n          \`[claude-code] Ignoring post-result process error: \${error instanceof Error ? error.message : String(error)}\`\n        );\n      } else {\n        throw this.handleClaudeCodeError(error, messagesPrompt, collectedStderr);\n      }\n`,
+  );
 }
 
 const patches = [
@@ -41,12 +41,17 @@ const patches = [
   },
 ];
 
-for (const patch of patches) {
-  if (!fs.existsSync(patch.file)) continue;
-  const original = fs.readFileSync(patch.file, 'utf8');
-  const updated = patch.apply(original);
-  if (updated !== original) {
-    fs.writeFileSync(patch.file, updated, 'utf8');
-    console.log(`[postinstall] patched ${patch.name}`);
+function applyProviderPatches() {
+  for (const patch of patches) {
+    if (!fs.existsSync(patch.file)) continue;
+    const original = fs.readFileSync(patch.file, 'utf8');
+    const updated = patch.apply(original);
+    if (updated !== original) {
+      fs.writeFileSync(patch.file, updated, 'utf8');
+      console.log(`[postinstall] patched ${patch.name}`);
+    }
   }
 }
+
+const invokedPath = process.argv[1] ? pathToFileURL(path.resolve(process.argv[1])).href : undefined;
+if (import.meta.url === invokedPath) applyProviderPatches();

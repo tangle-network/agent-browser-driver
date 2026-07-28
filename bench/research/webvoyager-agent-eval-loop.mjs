@@ -4,11 +4,8 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { execFileSync, execSync } from 'node:child_process';
 import {
-  aggregateRunScore,
   AxGepaSteeringOptimizer,
-  JsonlTrialCache,
   PairwiseSteeringOptimizer,
-  runPromptEvolution,
   validateRunRecord,
 } from '@tangle-network/agent-eval';
 
@@ -106,74 +103,7 @@ async function optimize() {
     },
   });
   const axGepa = await maybeRunAxGepa(comparableRows);
-
-  const scoreByKey = new Map(comparableRows.map((row) => [`${row.variantId}\u0000${row.scenarioId}`, row]));
-  const seedVariants = comparableVariantIds.map((variantId) => ({
-    id: variantId,
-    payload: { variantId },
-    generation: 0,
-    label: variantId,
-  }));
-  const cache = new JsonlTrialCache(path.join(stateDir, 'trial-cache.jsonl'));
-  const evolution = await runPromptEvolution({
-    runId: `webvoyager-agent-eval-${timestamp()}`,
-    target: 'webvoyager-browser-strategy',
-    seedVariants,
-    scenarioIds,
-    reps: 1,
-    generations: 1,
-    populationSize: seedVariants.length,
-    scoreConcurrency: 8,
-    cache,
-    scoreAdapter: {
-      async score({ variant, scenarioId, rep }) {
-        const row = scoreByKey.get(`${variant.id}\u0000${scenarioId}`);
-        if (!row) {
-          return {
-            variantId: variant.id,
-            scenarioId,
-            rep,
-            ok: false,
-            score: 0,
-            metrics: { missingScore: 1 },
-            error: 'missing scored row for variant/scenario',
-          };
-        }
-        const score = aggregateRunScore(row.score, {
-          success: 5,
-          finalGate: 4,
-          testReality: 3,
-          costUsd: -0.05,
-          wallSeconds: -0.02,
-        });
-        return {
-          variantId: variant.id,
-          scenarioId,
-          rep,
-          ok: row.score.finalGate > 0,
-          score,
-          cost: row.score.costUsd,
-          durationMs: row.score.wallSeconds * 1000,
-          metrics: {
-            strictSuccess: row.score.success,
-            finalGate: row.score.finalGate,
-            goalProgress: row.score.goalProgress,
-            testReality: row.score.testReality,
-          },
-        };
-      },
-    },
-    mutateAdapter: {
-      async mutate() {
-        throw new Error('mutation is intentionally not run in optimize mode; implement variants in code, ingest scored runs, then compare');
-      },
-    },
-    objectives: [
-      { name: 'strictScore', direction: 'maximize', value: (a) => a.meanScore },
-      { name: 'cost', direction: 'minimize', value: (a) => a.meanCost },
-      { name: 'duration', direction: 'minimize', value: (a) => a.meanDurationMs },
-    ],
-  });
+  const recommendedVariantId = pairwise.recommendedVariantId;
 
   const result = {
     generatedAt: new Date().toISOString(),
@@ -190,15 +120,10 @@ async function optimize() {
     },
     pairwise,
     axGepa,
-    promptEvolution: {
-      bestVariantId: evolution.bestVariant.id,
-      bestAggregate: evolution.bestAggregate,
-      generations: evolution.generations.map((generation) => ({
-        generation: generation.generation,
-        winnerId: generation.winnerId,
-        paretoFrontIds: generation.paretoFrontIds,
-        aggregates: generation.aggregates,
-      })),
+    selection: {
+      method: pairwise.backend,
+      recommendedVariantId,
+      rankings: pairwise.rankings,
     },
     nextTacticalStep: variantIds.length < 2
       ? 'Implement one real code variant, run train-smoke, ingest it, then rerun optimize. AxGEPA/selector training is not meaningful with one variant.'
@@ -209,7 +134,7 @@ async function optimize() {
       totalRows: allRows.length,
       coverage,
       axGepa,
-      evolutionBest: evolution.bestVariant.id,
+      recommendedVariantId,
     }),
   };
 
@@ -219,7 +144,7 @@ async function optimize() {
     at: result.generatedAt,
     rows: allRows.length,
     variants: variantIds,
-    winner: evolution.bestVariant.id,
+    winner: recommendedVariantId,
   });
   console.log(JSON.stringify(result, null, 2));
 }
@@ -309,7 +234,7 @@ async function maybeRunAxGepa(rows) {
   return optimizer.optimize(rows);
 }
 
-function assessValue({ variantIds, allRows, totalRows, coverage, axGepa, evolutionBest }) {
+function assessValue({ variantIds, allRows, totalRows, coverage, axGepa, recommendedVariantId }) {
   const strictPasses = allRows.filter((row) => row.score?.success === 1).length;
   const falsePositiveRisk = allRows.filter((row) => Array.isArray(row.score?.notes) && row.score.notes.includes('verifier-false-positive-risk')).length;
   const calendarFailures = allRows.filter((row) => Array.isArray(row.score?.notes) && row.score.notes.includes('calendar-date-picker')).length;
@@ -317,7 +242,7 @@ function assessValue({ variantIds, allRows, totalRows, coverage, axGepa, evoluti
   return {
     verdict: variantIds.length < 2 ? 'plumbing-only-not-yet-value-proof' : 'variant-comparison-available',
     why: variantIds.length < 2
-      ? 'Only the baseline variant has been scored. This proves ingestion, strict scoring, RunRecord validation, caching, and agent-eval optimization plumbing, but it does not prove a benchmark improvement.'
+      ? 'Only the baseline variant has been scored. This proves ingestion, strict scoring, RunRecord validation, and agent-eval ranking, but it does not prove a benchmark improvement.'
       : 'At least two variants are scored on overlapping scenarios. Pairwise comparison is available; AxGEPA only counts as evidence when it is not skipped. This is still not a promotion claim without dev/holdout coverage.',
     evidence: {
       variants: variantIds.length,
@@ -330,7 +255,7 @@ function assessValue({ variantIds, allRows, totalRows, coverage, axGepa, evoluti
       falsePositiveRisk,
       calendarFailures,
       axGepaSkipped: Boolean(axGepa?.skipped),
-      evolutionBest,
+      recommendedVariantId,
     },
     nextFalsification: 'Score a second real code variant on the same scenarios. If strict pass does not improve or dev regresses, this loop has not earned promotion.',
   };
@@ -359,12 +284,6 @@ function computeCoverage(rows, variantIds) {
   return { allScenarios, byVariant, variantsByScenario, comparableScenarios };
 }
 
-function intersection(lists) {
-  if (!lists.length) return [];
-  const [first, ...rest] = lists;
-  return first.filter((item) => rest.every((list) => list.includes(item)));
-}
-
 function scenariosWithMultipleVariants(rows) {
   const variantsByScenario = new Map();
   for (const row of rows) {
@@ -384,11 +303,11 @@ Commands:
     Convert a BAD track summary into agent-eval optimizer rows and RunRecords.
 
   optimize [--state-dir <dir>]
-    Run agent-eval PairwiseSteeringOptimizer + runPromptEvolution over ingested variants.
+    Rank ingested variants with agent-eval PairwiseSteeringOptimizer and optional AxGEPA.
 
-This is intentionally a thin browser adapter. Mutation generation and promotion
-stay in agent-eval primitives; browser-specific code only translates BAD reports
-into scored rows.
+This is intentionally a thin browser adapter. Browser Agent Driver produces and
+scores variants; agent-eval ranks them. Promotion still requires separate dev and
+holdout results.
 `);
 }
 
@@ -438,10 +357,6 @@ function gitSha() {
   } catch {
     return 'unknown';
   }
-}
-
-function timestamp() {
-  return new Date().toISOString().replace(/[-:]/g, '').replace(/\..+$/, '').replace('T', '-');
 }
 
 function shellQuote(value) {
