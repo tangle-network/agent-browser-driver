@@ -284,12 +284,6 @@ function computeCoverage(rows, variantIds) {
   return { allScenarios, byVariant, variantsByScenario, comparableScenarios };
 }
 
-function intersection(lists) {
-  if (!lists.length) return [];
-  const [first, ...rest] = lists;
-  return first.filter((item) => rest.every((list) => list.includes(item)));
-}
-
 function scenariosWithMultipleVariants(rows) {
   const variantsByScenario = new Map();
   for (const row of rows) {
