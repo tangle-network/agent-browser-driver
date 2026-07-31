@@ -554,7 +554,7 @@ P1:
 - stabilize stealth reach5 at 100% across repeated seeded runs before promotion
 - raise Tier 2 authenticated coverage with the same artifact standards
 - reduce `fast-explore` cost and turn variance on authenticated template verification before considering it a Tier 2 default
-- keep Tier 2 repeated gate and Tier 3 public gate healthy in CI
+- keep the Tier 2 repeated gate healthy in CI; run the Tier 3 public gate on demand with `npm run bench:tier3:gate`
 - improve the guarded search/content path before promoting any new subagent policy
 - use the top-2 branch challenger only as a measured experiment until it beats the guarded baseline on repeated seeded runs
 
