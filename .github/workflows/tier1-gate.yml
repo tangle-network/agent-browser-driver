@@ -34,13 +34,16 @@ jobs:
         run: |
           pnpm bench:tier1:gate -- \
             --out ./agent-results/tier1-ci \
-            --model gpt-5.2 \
+            --model "${{ vars.BAD_CI_MODEL || 'groq/llama-3.1-8b-instant' }}" \
             --min-full-pass-rate 1 \
             --min-fast-pass-rate 1 \
             --max-avg-turns 24 \
             --max-avg-duration-ms 120000
         env:
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          # groq/* model ids resolve only through an OpenAI-compatible router;
+          # override both vars together to pin a direct-provider model.
+          LLM_BASE_URL: ${{ vars.BAD_CI_LLM_BASE_URL || 'https://router.tangle.tools/v1' }}
       - name: Upload gate artifacts
         if: always() && env.SKIP_GATE != 'true'
         uses: actions/upload-artifact@v4
