@@ -2,14 +2,30 @@
 
 Browser Agent Driver (`bad` CLI) — general-purpose agentic browser automation.
 
+## Merge gate: local sign-off, not CI
+
+**The merge gate is `pnpm signoff --source head`, run locally. CI is not the merge gate.**
+A merge whose commit has no valid sign-off proof is a defect, in the same sense a merge with a failing test is a defect — regardless of who merged it or how urgent it was.
+
+```bash
+nvm use                       # .nvmrc pins Node 22; the gate REFUSES another major
+pnpm signoff --source head    # verifies exactly the commit that would merge
+```
+
+Attach the proof to the pull request and merge on it. Do not wait for CI.
+
+None of `.github/workflows/ci.yml`, `tier1-gate.yml`, or `tier2-staging-gate.yml` trigger on `pull_request` anymore. `ci.yml`'s `build` job is a post-merge safety net that mirrors `signoff.config.mjs`; `tier1-gate.yml`/`tier2-staging-gate.yml` need real secrets (`OPENAI_API_KEY`, and for tier2 a live `AI_TANGLE_STORAGE_STATE` session) a local run cannot hold, so they also run post-merge only. All three file into the same rolling issue on failure.
+
+[`docs/SIGNOFF.md`](./docs/SIGNOFF.md) states what a green run proves and, unsoftened, what it cannot — including an unresolved Node 20/22 pin disagreement between `ci.yml`'s test matrix and the two tier workflows.
+
 ## Gates
 
-Required before merge:
-- `pnpm lint` — type-check
-- `pnpm check:boundaries` — architecture boundaries
-- `pnpm test` — unit + integration (549 tests)
-- Tier1 deterministic gate on PRs and `main`
-- Tier2 staging gate when secrets available
+What the merge gate and the post-merge safety net actually check:
+- `pnpm run lint` — type-check
+- `pnpm run check:boundaries` — architecture boundaries
+- `pnpm run test` — unit + integration
+- Tier1 deterministic gate — post-merge on `main`, was pre-merge before the sign-off adoption above
+- Tier2 staging gate when secrets available — post-merge on `main`, was pre-merge before the sign-off adoption above
 
 ## Releases
 
