@@ -41,6 +41,14 @@ export const DEFAULT_WALLET_ACTION_SELECTORS = [
   '[role="button"]:has-text("No thanks")',
   'button:has-text("No Thanks")',
   '[role="button"]:has-text("No Thanks")',
+  'button:has-text("Skip")',
+  '[role="button"]:has-text("Skip")',
+  'button:has-text("Maybe later")',
+  '[role="button"]:has-text("Maybe later")',
+  'button:has-text("Remind me later")',
+  '[role="button"]:has-text("Remind me later")',
+  'button:has-text("Not now")',
+  '[role="button"]:has-text("Not now")',
 ];
 
 export const DEFAULT_CONNECT_SELECTORS = [
@@ -198,18 +206,40 @@ const clickFirstEnabled = async (
 
   while (Date.now() < deadline) {
     for (const selector of selectors) {
+      const remainingMs = deadline - Date.now();
+      if (remainingMs <= 0) {
+        return false;
+      }
+      const selectorTimeoutMs = Math.min(500, remainingMs);
       const locator = page.locator(selector);
-      const count = await locator.count().catch(() => 0);
+      const count = await withTimeout(locator.count().catch(() => 0), selectorTimeoutMs, 0);
       for (let index = 0; index < count; index += 1) {
+        const clickRemainingMs = deadline - Date.now();
+        if (clickRemainingMs <= 0) {
+          return false;
+        }
         const candidate = locator.nth(index);
-        const visible = await candidate.isVisible({ timeout: 250 }).catch(() => false);
+        const visible = await withTimeout(
+          candidate.isVisible({ timeout: Math.min(250, clickRemainingMs) }).catch(() => false),
+          Math.min(300, clickRemainingMs),
+          false,
+        );
         if (!visible) continue;
-        const enabled = await candidate.isEnabled().catch(() => false);
+        const enabledTimeoutMs = Math.max(1, Math.min(300, deadline - Date.now()));
+        const enabled = await withTimeout(
+          candidate.isEnabled().catch(() => false),
+          enabledTimeoutMs,
+          false,
+        );
         if (!enabled) continue;
-        const clicked = await candidate
-          .click({ timeout: 1_500, force: true })
-          .then(() => true)
-          .catch(() => false);
+        const clicked = await withTimeout(
+          candidate
+            .click({ timeout: Math.min(1_000, Math.max(1, deadline - Date.now())), force: true })
+            .then(() => true)
+            .catch(() => false),
+          Math.min(1_100, Math.max(1, deadline - Date.now())),
+          false,
+        );
         if (clicked) {
           return true;
         }
@@ -261,14 +291,83 @@ const waitForNoConnectingState = async (
 };
 
 const fillWalletUnlockIfNeeded = async (page: Page, password: string): Promise<boolean> => {
+  const unlockSelector = page.url().includes('/unlock')
+    ? '[data-testid="unlock-password"], input[type="password"], input[placeholder="Enter your password"], input'
+    : '[data-testid="unlock-password"], input[type="password"], input[placeholder="Enter your password"]';
   const unlockField = page
-    .locator('[data-testid="unlock-password"], input[type="password"]')
+    .locator(unlockSelector)
     .first();
-  const visible = await unlockField.isVisible({ timeout: 200 }).catch(() => false);
+  const visible = await withTimeout(
+    unlockField.isVisible({ timeout: 200 }).catch(() => false),
+    500,
+    false,
+  );
   if (!visible) {
     return false;
   }
-  await unlockField.fill(password, { timeout: 1_500 }).catch(() => {});
+  return withTimeout(
+    unlockField
+      .fill(password, { timeout: 1_000 })
+      .then(() => true)
+      .catch(() => false),
+    1_200,
+    false,
+  );
+};
+
+const DISMISSIBLE_ONBOARDING_PATHS = [
+  'setup-passkey',
+  'metametrics',
+  'recovery-phrase-reminder',
+  'secure-wallet',
+];
+
+const PASSKEY_DISMISS_SELECTORS = [
+  'button:text-matches("^\\s*Skip\\s*$", "i")',
+  '[role="button"]:text-matches("^\\s*Skip\\s*$", "i")',
+  'text="Skip"',
+  'button:text-matches("^\\s*Maybe later\\s*$", "i")',
+  '[role="button"]:text-matches("^\\s*Maybe later\\s*$", "i")',
+  'text="Maybe later"',
+  'button:text-matches("^\\s*Remind me later\\s*$", "i")',
+  '[role="button"]:text-matches("^\\s*Remind me later\\s*$", "i")',
+  'text="Remind me later"',
+  'button:text-matches("^\\s*Not now\\s*$", "i")',
+  '[role="button"]:text-matches("^\\s*Not now\\s*$", "i")',
+  'text="Not now"',
+  'button:text-matches("^\\s*No thanks\\s*$", "i")',
+  '[role="button"]:text-matches("^\\s*No thanks\\s*$", "i")',
+  'text="No thanks"',
+  'button:text-matches("^\\s*Continue without passkey\\s*$", "i")',
+  '[role="button"]:text-matches("^\\s*Continue without passkey\\s*$", "i")',
+  'text="Continue without passkey"',
+  'button:text-matches("^\\s*Continue\\s*$", "i")',
+  '[role="button"]:text-matches("^\\s*Continue\\s*$", "i")',
+  'text="Continue"',
+];
+
+const dismissBlockingWalletOnboardingIfNeeded = async (page: Page): Promise<boolean> => {
+  const url = page.url();
+  const isDismissibleOnboarding = DISMISSIBLE_ONBOARDING_PATHS.some((path) => url.includes(path));
+  if (!isDismissibleOnboarding) {
+    return false;
+  }
+
+  const clicked = await clickFirstEnabled(page, PASSKEY_DISMISS_SELECTORS, 1_500);
+  if (clicked) {
+    return true;
+  }
+
+  if (!url.includes('setup-passkey')) {
+    return false;
+  }
+
+  await page
+    .goto(url.replace(/home\.html#.*$/, 'home.html'), {
+      waitUntil: 'domcontentloaded',
+      timeout: 2_000,
+    })
+    .catch(() => {});
   return true;
 };
 
@@ -329,6 +428,7 @@ export const startWalletAutoApprover = async (
       const url = page.url();
       if (!isWalletExtensionPage(url, extensionId)) continue;
       await fillWalletUnlockIfNeeded(page, password);
+      await dismissBlockingWalletOnboardingIfNeeded(page);
       await clickFirstEnabled(page, actionSelectors, 1_200);
     }
   };
@@ -369,11 +469,18 @@ export const settleWalletPrompts = async (
   let clickedAny = false;
 
   const tryApproveOnPage = async (page: Page): Promise<void> => {
+    let quietAttempts = 0;
     for (let attempt = 0; attempt < 10; attempt += 1) {
       if (page.isClosed()) return;
-      await fillWalletUnlockIfNeeded(page, password);
+      const unlocked = await fillWalletUnlockIfNeeded(page, password);
+      const dismissedOnboarding = await dismissBlockingWalletOnboardingIfNeeded(page);
       const clicked = await clickFirstEnabled(page, actionSelectors, 1_000);
-      clickedAny = clickedAny || clicked;
+      const acted = unlocked || dismissedOnboarding || clicked;
+      clickedAny = clickedAny || acted;
+      quietAttempts = acted ? 0 : quietAttempts + 1;
+      if (quietAttempts >= 2) {
+        return;
+      }
       await page.waitForTimeout(150).catch(() => {});
     }
   };
@@ -401,6 +508,7 @@ export const settleWalletPrompts = async (
       await promptPage
         .goto(`chrome-extension://${extensionId}/${path}`, {
           waitUntil: 'domcontentloaded',
+          timeout: 3_000,
         })
         .catch(() => {});
       await tryApproveOnPage(promptPage);

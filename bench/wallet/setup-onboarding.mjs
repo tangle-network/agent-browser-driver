@@ -12,7 +12,10 @@
 import fs from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { chromium } from 'playwright'
+const playwrightModule = process.env.PLAYWRIGHT_MODULE
+  ? await import(process.env.PLAYWRIGHT_MODULE)
+  : await import('playwright')
+const { chromium } = playwrightModule.chromium ? playwrightModule : playwrightModule.default
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 const rootDir = path.resolve(__dirname, '../..')
@@ -114,13 +117,56 @@ const hasUnlock = await unlockBtn.isVisible({ timeout: 3_000 }).catch(() => fals
 
 if (hasUnlock) {
   console.log('Already onboarded — unlocking.')
-  await page.locator('input[type="password"], input[placeholder*="password" i]').first().fill(password)
+  const passwordInput = page.locator('input[type="password"], input[placeholder*="password" i]').first()
+  await passwordInput.waitFor({ state: 'visible', timeout: 10_000 })
+  const passwordBox = await passwordInput.boundingBox().catch(() => null)
+  if (passwordBox) {
+    await page.mouse.click(passwordBox.x + passwordBox.width / 2, passwordBox.y + passwordBox.height / 2)
+  } else {
+    await passwordInput.click({ timeout: 3_000 })
+  }
+  await page.keyboard.press(process.platform === 'darwin' ? 'Meta+A' : 'Control+A')
+  await page.keyboard.type(password, { delay: 20 })
+  await page.waitForTimeout(500)
+
+  for (let i = 0; i < 20; i++) {
+    if (await unlockBtn.isEnabled().catch(() => false)) break
+    await page.waitForTimeout(500)
+  }
+
   await unlockBtn.click()
   await page.waitForTimeout(3000)
   // Dismiss any post-unlock modals
-  for (const t of [['Got it', 'Got it!'], ['No thanks'], ['Done']]) {
+  for (const t of [
+    ['Maybe later'],
+    ['Continue'],
+    ['Open wallet'],
+    ['Got it', 'Got it!'],
+    ['No thanks'],
+    ['Done'],
+  ]) {
     await clickBtn(t, `Dismiss: ${t[0]}`, 2_000)
   }
+
+  const doneButton = page.locator('[data-testid="onboarding-complete-done"]').first()
+  if (await doneButton.isVisible({ timeout: 2_000 }).catch(() => false)) {
+    await doneButton.click({ force: true, timeout: 3_000 }).catch(() => null)
+    console.log('  ✓ Dismissed onboarding completion')
+    await page.waitForTimeout(1500)
+  }
+
+  if (page.url().includes('onboarding')) {
+    await page.goto(`chrome-extension://${extensionId}/home.html`, { waitUntil: 'domcontentloaded' })
+    await page.waitForTimeout(1500)
+  }
+
+  if (page.url().includes('onboarding')) {
+    await screenshot('unlock-stuck')
+    console.error('Wallet unlock did not clear onboarding.')
+    await context.close()
+    process.exit(1)
+  }
+
   console.log('\n✓ Wallet unlocked and ready.')
   await context.close()
   process.exit(0)
@@ -264,7 +310,7 @@ if (pwCount >= 2) {
 const checkbox = page.locator('input[type="checkbox"]').first()
 if (await checkbox.isVisible().catch(() => false)) {
   await checkbox.check().catch(async () => {
-    await checkbox.click()
+    await checkbox.click({ force: true })
   })
   console.log('  ✓ Accepted terms')
 }
@@ -317,6 +363,7 @@ if (page.url().includes('onboarding')) {
 
 // Dismiss any post-onboarding modals
 for (const texts of [
+  ['Maybe later'],
   ['Got it', 'Got it!'],
   ['Next'],
   ['Done'],

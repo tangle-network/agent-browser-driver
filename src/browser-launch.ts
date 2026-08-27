@@ -149,9 +149,11 @@ function applyProfileBrowserArgs(
     '--disable-infobars',
     '--no-first-run',
     '--no-default-browser-check',
-    // Real GPU rendering — headless defaults to SwiftShader which has a
-    // distinct WebGL fingerprint that anti-bot systems flag.
-    '--use-gl=desktop',
+    // CI and Xvfb environments commonly lack desktop GL. Use ANGLE+SwiftShader
+    // by default; callers that need real GPU rendering can still pass their own
+    // --use-gl flag in browserArgs.
+    '--use-gl=angle',
+    '--use-angle=swiftshader',
   ];
 
   for (const arg of stealthArgs) {
